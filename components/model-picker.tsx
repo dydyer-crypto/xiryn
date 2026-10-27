@@ -8,7 +8,7 @@ import {
   RefreshCwIcon,
 } from "lucide-react"
 
-import { fetchProviderModels } from "@/actions/settings"
+import { fetchModelCapabilities, fetchProviderModels } from "@/actions/settings"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
 import {
@@ -19,7 +19,11 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command"
-import { parseModelSpec, type ProviderId } from "@/lib/providers/catalog"
+import {
+  parseModelSpec,
+  type ModelCapabilities,
+  type ProviderId,
+} from "@/lib/providers/catalog"
 import { cn } from "@/lib/utils"
 import type { SystemStatus } from "@/queries/workspace"
 
@@ -74,6 +78,46 @@ export function ModelSpecLabel({
   )
 }
 
+// What the chosen model can do. A text-only model looks fine until the agent
+// takes its first screenshot, which the provider then rejects — so say it here.
+function CapabilityNote({ caps }: { caps: ModelCapabilities }) {
+  const facts: React.ReactNode[] = []
+  if (caps.vision) {
+    facts.push(
+      <span key="vision" className="text-ok">
+        vision
+      </span>
+    )
+  } else if (caps.vision === false) {
+    facts.push(
+      <span key="vision" className="text-warn">
+        no image input
+      </span>
+    )
+  }
+  if (caps.tools === false) {
+    facts.push(
+      <span key="tools" className="text-warn">
+        no tool calling
+      </span>
+    )
+  }
+  if (caps.contextLength) {
+    facts.push(
+      <span key="context">{Math.round(caps.contextLength / 1024)}K context</span>
+    )
+  }
+  if (!facts.length) return null
+  return (
+    <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 font-mono text-[10.5px] text-muted-foreground">
+      {facts}
+      {caps.vision === false && (
+        <span className="text-warn">· desktop screenshots will fail</span>
+      )}
+    </span>
+  )
+}
+
 export function ModelPicker({
   value,
   onChange,
@@ -97,6 +141,23 @@ export function ModelPicker({
   const [query, setQuery] = React.useState("")
   const [listings, setListings] = React.useState<Partial<Record<ProviderId, Listing>>>({})
   const configured = providers.filter((p) => p.configured)
+  const [caps, setCaps] = React.useState<ModelCapabilities | null>(null)
+
+  // Local runtimes answer this; hosted providers don't, so `caps` stays null
+  React.useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setCaps(null)
+    if (!value) return
+    let alive = true
+    fetchModelCapabilities(value)
+      .then((next) => {
+        if (alive) setCaps(next)
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [value])
 
   // Asked for when the picker opens (and on Refresh), not on every render
   const fetchAll = (refresh = false) => {
@@ -121,129 +182,132 @@ export function ModelPicker({
   const typedIsSpec = !!parseModelSpec(typed)
 
   return (
-    <Popover
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next)
-        if (next) fetchAll()
-      }}
-    >
-      <PopoverTrigger
-        id={id}
-        aria-invalid={invalid}
-        className={cn(
-          "flex h-8 w-full items-center gap-2 rounded-lg border border-input bg-transparent px-2.5 text-left text-sm transition-colors outline-none hover:bg-accent/40 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive dark:bg-input/30",
-          className
-        )}
+    <>
+      <Popover
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next)
+          if (next) fetchAll()
+        }}
       >
-        {value ? (
-          <ModelSpecLabel spec={value} className="flex-1" />
-        ) : (
-          <span className="flex min-w-0 flex-1 items-baseline gap-2">
-            <span className="text-[13px]">Workspace default</span>
-            {defaultSpec && (
-              <ModelSpecLabel
-                spec={defaultSpec}
-                className="text-muted-foreground opacity-80"
-              />
-            )}
-          </span>
-        )}
-        <ChevronsUpDownIcon className="size-3.5 text-muted-foreground" />
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-(--anchor-width) min-w-80 gap-0 p-0">
-        <Command loop>
-          <CommandInput
-            placeholder="Search, or type provider/model-id"
-            value={query}
-            onValueChange={setQuery}
-          />
-          <CommandList className="max-h-80">
-            <CommandEmpty className="px-3 py-4 text-left text-[12.5px] text-muted-foreground">
-              {typed && !typedIsSpec
-                ? "Type the full id as provider/model, e.g. ollama/qwen3:8b"
-                : "No models found."}
-            </CommandEmpty>
-            {typedIsSpec && (
-              <CommandGroup heading="Custom">
-                <CommandItem value={`custom ${typed}`} onSelect={() => pick(typed)}>
-                  <CornerDownLeftIcon className="text-muted-foreground" />
-                  Use <ModelSpecLabel spec={typed} />
-                </CommandItem>
-              </CommandGroup>
-            )}
-            {allowDefault && (
-              <CommandGroup heading="Default">
-                <CommandItem value="workspace default" onSelect={() => pick("")}>
-                  Workspace default
-                  {defaultSpec && (
-                    <ModelSpecLabel
-                      spec={defaultSpec}
-                      className="text-muted-foreground"
-                    />
-                  )}
-                  {!value && <CheckIcon className="ml-auto size-3.5" />}
-                </CommandItem>
-              </CommandGroup>
-            )}
-            {configured.map((provider) => {
-              const listing = listings[provider.id]
-              const models = [
-                ...new Set([...provider.suggested, ...(listing?.models ?? [])]),
-              ]
-              return (
-                <CommandGroup
-                  key={provider.id}
-                  heading={
-                    <span className="flex items-center gap-2">
-                      {provider.name}
-                      {listing?.state === "loading" && <Spinner className="size-3" />}
-                      {listing?.state === "error" && (
-                        <span
-                          className="truncate font-normal text-destructive"
-                          title={listing.error}
-                        >
-                          couldn&apos;t list models
-                        </span>
-                      )}
-                    </span>
-                  }
-                >
-                  {models.map((model) => {
-                    const spec = `${provider.id}/${model}`
-                    return (
-                      <CommandItem key={spec} value={spec} onSelect={() => pick(spec)}>
-                        <span className="truncate font-mono text-[12px]">{model}</span>
-                        {value === spec && <CheckIcon className="ml-auto size-3.5" />}
-                      </CommandItem>
-                    )
-                  })}
+        <PopoverTrigger
+          id={id}
+          aria-invalid={invalid}
+          className={cn(
+            "flex h-8 w-full items-center gap-2 rounded-lg border border-input bg-transparent px-2.5 text-left text-sm transition-colors outline-none hover:bg-accent/40 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive dark:bg-input/30",
+            className
+          )}
+        >
+          {value ? (
+            <ModelSpecLabel spec={value} className="flex-1" />
+          ) : (
+            <span className="flex min-w-0 flex-1 items-baseline gap-2">
+              <span className="text-[13px]">Workspace default</span>
+              {defaultSpec && (
+                <ModelSpecLabel
+                  spec={defaultSpec}
+                  className="text-muted-foreground opacity-80"
+                />
+              )}
+            </span>
+          )}
+          <ChevronsUpDownIcon className="size-3.5 text-muted-foreground" />
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-(--anchor-width) min-w-80 gap-0 p-0">
+          <Command loop>
+            <CommandInput
+              placeholder="Search, or type provider/model-id"
+              value={query}
+              onValueChange={setQuery}
+            />
+            <CommandList className="max-h-80">
+              <CommandEmpty className="px-3 py-4 text-left text-[12.5px] text-muted-foreground">
+                {typed && !typedIsSpec
+                  ? "Type the full id as provider/model, e.g. ollama/qwen3:8b"
+                  : "No models found."}
+              </CommandEmpty>
+              {typedIsSpec && (
+                <CommandGroup heading="Custom">
+                  <CommandItem value={`custom ${typed}`} onSelect={() => pick(typed)}>
+                    <CornerDownLeftIcon className="text-muted-foreground" />
+                    Use <ModelSpecLabel spec={typed} />
+                  </CommandItem>
                 </CommandGroup>
-              )
-            })}
-          </CommandList>
-          <div className="flex items-center gap-2 border-t px-3 py-2 text-[11.5px] text-muted-foreground">
-            {configured.length === 0 ? (
-              <span>No provider has a key yet — add one in Settings.</span>
-            ) : (
-              <>
-                <span className="truncate">
-                  {providers.length - configured.length} more providers available in
-                  Settings
-                </span>
-                <button
-                  type="button"
-                  onClick={() => fetchAll(true)}
-                  className="ml-auto inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 hover:bg-accent hover:text-foreground"
-                >
-                  <RefreshCwIcon className="size-3" />
-                  Refresh
-                </button>
-              </>
-            )}
-          </div>
-        </Command>
-      </PopoverContent>
-    </Popover>
+              )}
+              {allowDefault && (
+                <CommandGroup heading="Default">
+                  <CommandItem value="workspace default" onSelect={() => pick("")}>
+                    Workspace default
+                    {defaultSpec && (
+                      <ModelSpecLabel
+                        spec={defaultSpec}
+                        className="text-muted-foreground"
+                      />
+                    )}
+                    {!value && <CheckIcon className="ml-auto size-3.5" />}
+                  </CommandItem>
+                </CommandGroup>
+              )}
+              {configured.map((provider) => {
+                const listing = listings[provider.id]
+                const models = [
+                  ...new Set([...provider.suggested, ...(listing?.models ?? [])]),
+                ]
+                return (
+                  <CommandGroup
+                    key={provider.id}
+                    heading={
+                      <span className="flex items-center gap-2">
+                        {provider.name}
+                        {listing?.state === "loading" && <Spinner className="size-3" />}
+                        {listing?.state === "error" && (
+                          <span
+                            className="truncate font-normal text-destructive"
+                            title={listing.error}
+                          >
+                            couldn&apos;t list models
+                          </span>
+                        )}
+                      </span>
+                    }
+                  >
+                    {models.map((model) => {
+                      const spec = `${provider.id}/${model}`
+                      return (
+                        <CommandItem key={spec} value={spec} onSelect={() => pick(spec)}>
+                          <span className="truncate font-mono text-[12px]">{model}</span>
+                          {value === spec && <CheckIcon className="ml-auto size-3.5" />}
+                        </CommandItem>
+                      )
+                    })}
+                  </CommandGroup>
+                )
+              })}
+            </CommandList>
+            <div className="flex items-center gap-2 border-t px-3 py-2 text-[11.5px] text-muted-foreground">
+              {configured.length === 0 ? (
+                <span>No provider has a key yet — add one in Settings.</span>
+              ) : (
+                <>
+                  <span className="truncate">
+                    {providers.length - configured.length} more providers available in
+                    Settings
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => fetchAll(true)}
+                    className="ml-auto inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 hover:bg-accent hover:text-foreground"
+                  >
+                    <RefreshCwIcon className="size-3" />
+                    Refresh
+                  </button>
+                </>
+              )}
+            </div>
+          </Command>
+        </PopoverContent>
+      </Popover>
+      {value && caps ? <CapabilityNote caps={caps} /> : null}
+    </>
   )
 }

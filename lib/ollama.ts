@@ -129,8 +129,14 @@ export function agentContext() {
 }
 
 // How long Ollama keeps a model loaded after a request, so the next step of
-// a turn doesn't wait for it to load again
-export const OLLAMA_KEEP_ALIVE = "30m"
+// a turn doesn't wait for it to load again. Ollama takes the same values as
+// its own API: a duration ("30m", "2h") or -1 to never unload.
+export const KEEP_ALIVE_PATTERN = /^(-1|\d{1,4}(s|m|h))$/
+
+export function agentKeepAlive() {
+  const value = getSetting("model.keepAlive")?.trim()
+  return value && KEEP_ALIVE_PATTERN.test(value) ? value : "30m"
+}
 
 // Model names as Ollama writes them: "qwen3.5:9b", "library/name:tag"
 export const OLLAMA_MODEL = /^[a-z0-9][a-z0-9._/-]{0,80}(:[a-z0-9._-]{1,60})?$/i
@@ -152,6 +158,12 @@ export function pullStates() {
   return [...pulls.values()]
 }
 
+// A pull can die mid-transfer (a dropped connection, a laptop that sleeps).
+// Ollama keeps the bytes it already has, so retrying picks up where it left
+// off instead of starting over — worth doing on its own rather than asking the
+// person to press Download again.
+const PULL_ATTEMPTS = 3
+
 export function pullModel(model: string) {
   if (pulls.get(model)?.state === "pulling") return
   pulls.set(model, {
@@ -162,60 +174,82 @@ export function pullModel(model: string) {
     total: 0,
   })
   void (async () => {
-    try {
-      const response = await fetch(`${ollamaRoot()}/api/pull`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ model, stream: true }),
-      })
-      if (!response.ok || !response.body) {
-        throw new Error(`${response.status} ${(await response.text()).slice(0, 200)}`)
+    const layers = new Map<string, { total: number; completed: number }>()
+    const totals = () => {
+      const sizes = [...layers.values()]
+      return {
+        completed: sizes.reduce((sum, layer) => sum + layer.completed, 0),
+        total: sizes.reduce((sum, layer) => sum + layer.total, 0),
       }
-      const reader = response.body.getReader()
-      const decoder = new TextDecoder()
-      const layers = new Map<string, { total: number; completed: number }>()
-      let buffer = ""
-      for (;;) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split("\n")
-        buffer = lines.pop() ?? ""
-        for (const line of lines) {
-          if (!line.trim()) continue
-          const event = JSON.parse(line) as {
-            status?: string
-            digest?: string
-            completed?: number
-            total?: number
-            error?: string
-          }
-          if (event.error) throw new Error(event.error)
-          // A model comes in several layers; progress is their sum
-          if (event.digest && event.total) {
-            layers.set(event.digest, {
-              total: event.total,
-              completed: event.completed ?? 0,
+    }
+
+    let lastError = "Download failed"
+
+    for (let attempt = 1; attempt <= PULL_ATTEMPTS; attempt++) {
+      try {
+        const response = await fetch(`${ollamaRoot()}/api/pull`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ model, stream: true }),
+        })
+        if (!response.ok || !response.body) {
+          throw new Error(`${response.status} ${(await response.text()).slice(0, 200)}`)
+        }
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ""
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split("\n")
+          buffer = lines.pop() ?? ""
+          for (const line of lines) {
+            if (!line.trim()) continue
+            const event = JSON.parse(line) as {
+              status?: string
+              digest?: string
+              completed?: number
+              total?: number
+              error?: string
+            }
+            if (event.error) throw new Error(event.error)
+            // A model comes in several layers; progress is their sum
+            if (event.digest && event.total) {
+              layers.set(event.digest, {
+                total: event.total,
+                completed: event.completed ?? 0,
+              })
+            }
+            pulls.set(model, {
+              model,
+              state: "pulling",
+              status: event.digest ? "downloading" : (event.status ?? ""),
+              ...totals(),
             })
           }
-          const sizes = [...layers.values()]
+        }
+        pulls.set(model, { model, state: "done" })
+        return
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error)
+        if (attempt < PULL_ATTEMPTS) {
           pulls.set(model, {
             model,
             state: "pulling",
-            status: event.digest ? "downloading" : (event.status ?? ""),
-            completed: sizes.reduce((sum, layer) => sum + layer.completed, 0),
-            total: sizes.reduce((sum, layer) => sum + layer.total, 0),
+            status: `connection lost, resuming (${attempt + 1}/${PULL_ATTEMPTS})`,
+            ...totals(),
           })
+          await new Promise((resolve) => setTimeout(resolve, 1500 * attempt))
         }
       }
-      pulls.set(model, { model, state: "done" })
-    } catch (error) {
-      pulls.set(model, {
-        model,
-        state: "failed",
-        error: error instanceof Error ? error.message : String(error),
-      })
     }
+
+    pulls.set(model, {
+      model,
+      state: "failed",
+      error: `${lastError} — gave up after ${PULL_ATTEMPTS} tries. Press Download to resume; the bytes already fetched are kept.`,
+    })
   })()
 }
 

@@ -18,6 +18,10 @@ type SettingDef = {
 
 const integrationSettings = {
   "model.default": { env: "XIRYN_DEFAULT_MODEL" },
+  // How long Ollama keeps a model loaded between turns: "30m", "2h", "-1"
+  // (never unload). A model on a slow disk can take minutes to load, so a
+  // bigger value trades memory for not paying that again on every turn.
+  "model.keepAlive": { env: "XIRYN_OLLAMA_KEEP_ALIVE", fallback: "30m" },
   "agent.maxSteps": { env: "XIRYN_MAX_STEPS", fallback: "40" },
   // US dollars a month; once reached, turns on paid models wait for next month
   "usage.monthlyBudget": { env: "XIRYN_MONTHLY_BUDGET" },

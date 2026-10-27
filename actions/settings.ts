@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache"
 
 import { isWritableSetting, setSetting } from "@/lib/config"
+import { KEEP_ALIVE_PATTERN } from "@/lib/ollama"
+import { modelCapabilities } from "@/lib/providers/capabilities"
 import { getProviderMeta, parseModelSpec, type ProviderId } from "@/lib/providers/catalog"
 import { discoverModels } from "@/lib/providers/discover"
 import { pingFirecrawl } from "@/lib/web"
@@ -53,6 +55,11 @@ export async function saveSettings(values: Record<string, string | null>) {
     ) {
       throw new Error("The budget is a dollar amount, e.g. 20 or 7.50.")
     }
+    if (key === "model.keepAlive" && value && !KEEP_ALIVE_PATTERN.test(value.trim())) {
+      throw new Error(
+        "Keep-alive looks like 30m, 2h or -1 (keep the model loaded until it's replaced)."
+      )
+    }
     if (key === "agent.maxSteps" && value && !/^\d{1,3}$/.test(value.trim())) {
       throw new Error("Max steps must be a whole number.")
     }
@@ -67,6 +74,18 @@ export async function fetchProviderModels(provider: ProviderId) {
     return { ok: true as const, models: await discoverModels(provider) }
   } catch (error) {
     return { ok: false as const, error: reason(error) }
+  }
+}
+
+// What the model can do, so the picker can say it before an agent finds out
+// the hard way (a text-only model fails on the first screenshot). Null when
+// the provider doesn't publish capabilities; hosted ones don't.
+export async function fetchModelCapabilities(spec: string) {
+  if (!parseModelSpec(spec)) return null
+  try {
+    return await modelCapabilities(spec)
+  } catch {
+    return null
   }
 }
 

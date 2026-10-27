@@ -2,6 +2,7 @@
 
 import { eq, notExists } from "drizzle-orm"
 import { revalidatePath } from "next/cache"
+import { z } from "zod"
 
 import { db } from "@/db"
 import {
@@ -77,4 +78,72 @@ export async function deleteAgent(agentId: string) {
     )
     .run()
   revalidatePath("/", "layout")
+}
+
+const agentsImportSchema = z.object({
+  agents: z
+    .array(
+      z.object({
+        name: z.string().min(1).max(40),
+        role: z.string().min(1).max(120),
+        instructions: z.string().max(6000).nullish(),
+        model: z.string().nullish(),
+      })
+    )
+    .min(1),
+})
+
+// Merges agent definitions from a file exported by /api/agents/export. A name
+// that already exists is skipped, so importing twice never duplicates agents.
+export async function importAgents(raw: string) {
+  let payload: unknown
+  try {
+    payload = JSON.parse(raw)
+  } catch {
+    throw new Error("That file isn't JSON — pick the file Xiryn exported.")
+  }
+
+  const parsed = agentsImportSchema.safeParse(payload)
+  if (!parsed.success) throw new Error("No agent definitions found in that file.")
+
+  const existing = new Set(
+    db
+      .select({ name: agents.name })
+      .from(agents)
+      .all()
+      .map((row) => row.name)
+  )
+
+  let created = 0
+  let skipped = 0
+  let failed = 0
+
+  for (const entry of parsed.data.agents) {
+    const name = entry.name.trim()
+    if (!name || existing.has(name)) {
+      skipped++
+      continue
+    }
+    try {
+      // Same validation as the agent dialog, so a hand-edited file can't
+      // write something the UI couldn't produce
+      const data = normalize({
+        name,
+        role: entry.role,
+        instructions: entry.instructions ?? null,
+        model: entry.model ?? null,
+      } as AgentInput)
+      db.transaction((tx) => {
+        const [agent] = tx.insert(agents).values(data).returning().all()
+        tx.insert(threads).values({ agentId: agent.id }).run()
+      })
+      existing.add(name)
+      created++
+    } catch {
+      failed++
+    }
+  }
+
+  revalidatePath("/", "layout")
+  return { created, skipped, failed }
 }

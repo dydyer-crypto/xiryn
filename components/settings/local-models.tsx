@@ -70,18 +70,18 @@ export function LocalModelsCard() {
   const router = useRouter()
   const { status } = useWorkspace()
   const [panel, setPanel] = React.useState<LocalModelsPanel | null>(null)
+  const [unreachable, setUnreachable] = React.useState<string | null>(null)
   const [busy, setBusy] = React.useState<string | null>(null)
   const [custom, setCustom] = React.useState("")
 
   const refresh = React.useCallback(async () => {
     try {
       setPanel(await localModelsPanel())
+      setUnreachable(null)
     } catch (error) {
-      toast.add({
-        type: "error",
-        title: "Couldn't reach Ollama",
-        description: reason(error),
-      })
+      // Without this the card sits on "checking ollama…" forever when the
+      // server can't be reached at all
+      setUnreachable(reason(error))
     }
   }, [])
 
@@ -189,13 +189,28 @@ export function LocalModelsCard() {
           <CpuIcon className="size-3.5 text-muted-foreground" />
           <span className="font-mono text-[12px]">
             {!panel
-              ? "checking ollama…"
+              ? unreachable
+                ? "ollama unreachable"
+                : "checking ollama…"
               : panel.running
                 ? `ollama ${panel.version ?? ""} · ${installed.length} model${installed.length === 1 ? "" : "s"} · ${panel.memoryGb} GB memory`
                 : panel.installed
                   ? "ollama isn't running"
                   : "ollama isn't installed"}
           </span>
+          {unreachable && (
+            <Button
+              size="xs"
+              variant="secondary"
+              className="ml-auto"
+              onClick={() => {
+                setUnreachable(null)
+                void refresh()
+              }}
+            >
+              Try again
+            </Button>
+          )}
           {panel?.running && !panel.connected && (
             <Button
               size="xs"

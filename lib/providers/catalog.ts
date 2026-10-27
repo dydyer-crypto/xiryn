@@ -151,6 +151,16 @@ export function getProviderMeta(id: string) {
   return providers.find((p) => p.id === id)
 }
 
+// What a model can do, as far as its runtime will say. Null means "unknown":
+// the provider doesn't expose it, so Xiryn never guesses. Client-safe.
+export type ModelCapabilities = {
+  // Accepts images (screenshots from the agent's desktop)
+  vision: boolean | null
+  // Can call tools; agents are useless without it
+  tools: boolean | null
+  contextLength: number | null
+}
+
 // "openai/gpt-6-luna" → { provider: "openai", model: "gpt-6-luna" }. Only the
 // first slash separates them, so OpenRouter ids like "openrouter/x-ai/grok"
 // keep their own slashes.

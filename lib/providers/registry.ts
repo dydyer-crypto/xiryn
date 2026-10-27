@@ -10,7 +10,7 @@ import type { LanguageModel } from "ai"
 import { createOllama } from "ai-sdk-ollama"
 
 import { getSetting, getSettingSource } from "@/lib/config"
-import { agentContext, OLLAMA_KEEP_ALIVE } from "@/lib/ollama"
+import { agentContext, agentKeepAlive } from "@/lib/ollama"
 import {
   formatModelSpec,
   getProviderMeta,
@@ -109,7 +109,7 @@ export function createModel(spec: string): LanguageModel {
           .replace(/\/+$/, "")
           .replace(/\/v1$/, ""),
         apiKey: apiKey || undefined,
-      })(model, { options: { num_ctx: agentContext() }, keep_alive: OLLAMA_KEEP_ALIVE })
+      })(model, { options: { num_ctx: agentContext() }, keep_alive: agentKeepAlive() })
     case "openrouter":
     case "lmstudio":
     case "custom":

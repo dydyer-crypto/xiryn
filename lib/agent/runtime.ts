@@ -775,7 +775,7 @@ export async function startTurn({
         usage.toolCalls += step.toolCalls.length
       },
       onError: ({ error }) => {
-        failure = describeError(error)
+        failure = describeError(error, activeSpec)
         console.error(`[xiryn] turn failed in thread ${threadId}:`, error)
       },
     })
@@ -803,7 +803,7 @@ export async function startTurn({
           usage.steps++
         },
         onError: ({ error }) => {
-          failure = describeError(error)
+          failure = describeError(error, activeSpec)
           console.error(`[xiryn] turn failed in thread ${threadId}:`, error)
         },
       })
@@ -948,17 +948,27 @@ export async function startTurn({
   return run
 }
 
-function describeError(error: unknown): string {
+function describeError(error: unknown, spec?: string | null): string {
+  let message: string
   if (error instanceof Error) {
     const cause = (error as { responseBody?: string }).responseBody
+    message = error.message
     if (cause) {
       try {
         const parsed = JSON.parse(cause)
         const detail = parsed?.error?.message ?? parsed?.message
-        if (typeof detail === "string") return `${error.message} — ${detail}`
+        if (typeof detail === "string") message = `${error.message} — ${detail}`
       } catch {}
     }
-    return error.message
+  } else {
+    message = String(error)
   }
-  return String(error)
+
+  // Every desktop action hands the model a screenshot, so a text-only model
+  // fails the whole request the moment an agent looks at its screen. Say what
+  // to do instead of relaying the provider's wording.
+  if (/does not support image|contains images|image inputs?/i.test(message)) {
+    return `${message} — ${spec ?? "this model"} can't take images, and agents send screenshots of their desktop. Give this agent a vision model (e.g. ollama/gemma4).`
+  }
+  return message
 }

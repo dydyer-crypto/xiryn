@@ -238,6 +238,7 @@ export function getSettingsView() {
     })),
     defaultModel: describeSetting("model.default"),
     resolvedDefaultModel: resolveModelSpec(null),
+    keepAlive: describeSetting("model.keepAlive"),
     maxSteps: describeSetting("agent.maxSteps"),
     workstation: {
       cpus: describeSetting("workstation.cpus"),

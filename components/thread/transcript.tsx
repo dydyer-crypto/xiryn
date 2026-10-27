@@ -343,11 +343,44 @@ function ScrollToBottom() {
   )
 }
 
+/* A turn that has started but produced nothing yet: the model is being loaded,
+   a cold local model can take minutes the first time. Counting the seconds out
+   loud beats a spinner that looks stuck. */
+function PendingTurn({ modelSpec }: { modelSpec?: string | null }) {
+  const [seconds, setSeconds] = React.useState(0)
+  const local = !!modelSpec && /^(ollama|lmstudio)\//.test(modelSpec)
+
+  React.useEffect(() => {
+    const timer = setInterval(() => setSeconds((value) => value + 1), 1000)
+    return () => clearInterval(timer)
+  }, [])
+
+  const waiting = seconds >= 8
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-[30px] font-mono text-[12px]">
+      <span className="size-1.5 animate-pulse-dot rounded-full bg-rigel text-rigel" />
+      <span className="shimmer-text">
+        {waiting
+          ? local
+            ? "loading the model…"
+            : "waiting for the model…"
+          : "booting turn…"}
+      </span>
+      {waiting && (
+        <span className="text-faint">
+          {seconds}s{local && " · a cold local model can take minutes"}
+        </span>
+      )}
+    </div>
+  )
+}
+
 export function Transcript({
   messages,
   members,
   status,
   isSquad,
+  modelSpec,
   empty,
   footer,
 }: {
@@ -355,6 +388,7 @@ export function Transcript({
   members: AgentLite[]
   status: ChatStatus
   isSquad: boolean
+  modelSpec?: string | null
   empty: React.ReactNode
   footer?: React.ReactNode
 }) {
@@ -387,10 +421,7 @@ export function Transcript({
           ) : null
         )}
         {status === "submitted" && last?.role === "user" && (
-          <div className="flex items-center gap-2 pl-[30px] font-mono text-[12px]">
-            <span className="size-1.5 animate-pulse-dot rounded-full bg-rigel text-rigel" />
-            <span className="shimmer-text">booting turn…</span>
-          </div>
+          <PendingTurn modelSpec={modelSpec} />
         )}
         {footer}
       </StickToBottom.Content>

@@ -685,6 +685,7 @@ export function ThreadView(props: ThreadViewProps) {
         members={members}
         status={chatStatus}
         isSquad={kind === "squad"}
+        modelSpec={modelSpec}
         empty={<EmptyThread props={props} onPick={send} />}
         footer={
           error ? (

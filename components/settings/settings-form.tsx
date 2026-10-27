@@ -19,6 +19,7 @@ import { fetchProviderModels, saveSettings, testIntegration } from "@/actions/se
 import { buildWorkstationImage, dockerStatus, startDocker } from "@/actions/workstation"
 import { ModelPicker } from "@/components/model-picker"
 import { Button } from "@/components/ui/button"
+import { AgentsBackup } from "@/components/settings/agents-backup"
 import { LocalModelsCard } from "@/components/settings/local-models"
 import { VaultPanel } from "@/components/settings/vault-panel"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -811,10 +812,13 @@ function ModelSection({ data }: { data: SettingsData }) {
   const [steps, setSteps] = React.useState(
     data.maxSteps.source === "local" ? (data.maxSteps.value ?? "") : ""
   )
+  const [keepAlive, setKeepAlive] = React.useState(
+    data.keepAlive.source === "local" ? (data.keepAlive.value ?? "") : ""
+  )
 
   return (
     <div className="flex flex-col gap-4 rounded-xl border bg-surface/50 p-4">
-      <div className="grid gap-4 sm:grid-cols-[1fr_160px]">
+      <div className="grid gap-4 sm:grid-cols-[1fr_140px_150px]">
         <label className="flex flex-col gap-1.5">
           <span className="flex items-center justify-between">
             <span className="label-mono">Default model</span>
@@ -851,13 +855,31 @@ function ModelSection({ data }: { data: SettingsData }) {
             Per turn, before it stops.
           </span>
         </label>
+        <label className="flex flex-col gap-1.5">
+          <span className="flex items-center justify-between">
+            <span className="label-mono">Keep alive</span>
+            <SourceBadge setting={data.keepAlive} />
+          </span>
+          <TextInput
+            value={keepAlive}
+            onChange={setKeepAlive}
+            placeholder={data.keepAlive.value ?? "30m"}
+          />
+          <span className="text-[11.5px] text-muted-foreground">
+            Ollama only: 30m, 2h or -1 to never unload.
+          </span>
+        </label>
       </div>
       <div>
         <Button
           size="sm"
           disabled={pending}
           onClick={() =>
-            save({ "model.default": model || null, "agent.maxSteps": steps || null })
+            save({
+              "model.default": model || null,
+              "agent.maxSteps": steps || null,
+              "model.keepAlive": keepAlive || null,
+            })
           }
         >
           {pending && <Spinner data-icon="inline-start" />}
@@ -1074,6 +1096,7 @@ export function SettingsForm({
             ))}
           </div>
           <DesktopNotify enabled={data.desktopNotify} />
+          <AgentsBackup />
           <UpdateCheck enabled={data.updateChecks} />
         </Section>
       </div>

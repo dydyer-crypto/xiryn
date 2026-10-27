@@ -65,7 +65,7 @@ Agents need a model with tool calling; one with vision also lets them see their 
 
 Replies on local models are marked *free* and never count toward the monthly budget.
 
-**Context size.** Unless asked otherwise, Ollama runs a model with a small context (4K on many machines) and silently cuts longer prompts — and an agent's instructions alone are several thousand tokens. Xiryn uses Ollama's own chat API, which takes the context per request, and asks for 32K with every turn (16K on computers with under 12 GB of memory). It also asks Ollama to keep the model loaded for 30 minutes between turns. Your models aren't changed, so they behave as before in other apps. `OLLAMA_BASE_URL` works with or without the `/v1` that OpenAI-style tools use.
+**Context size.** Unless asked otherwise, Ollama runs a model with a small context (4K on many machines) and silently cuts longer prompts — and an agent's instructions alone are several thousand tokens. Xiryn uses Ollama's own chat API, which takes the context per request, and asks for 32K with every turn (16K on computers with under 12 GB of memory). It also asks Ollama to keep the model loaded between turns — 30 minutes by default, or whatever `XIRYN_OLLAMA_KEEP_ALIVE` (Settings → Model) says, including `-1` to never unload it. Your models aren't changed, so they behave as before in other apps. `OLLAMA_BASE_URL` works with or without the `/v1` that OpenAI-style tools use.
 
 ### LM Studio
 
